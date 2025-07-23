@@ -36,6 +36,7 @@ def show_kpi_cards_with_yoy(filtered_df, palettes=None):
         'repeat_purchase_flag': 'mean',
         'roas': 'mean'
     })
+
     prev_vals = prev_year_df.agg({
         'revenue_total': 'sum',
         'profit': 'sum',
@@ -113,85 +114,59 @@ def show_kpi_cards_with_yoy(filtered_df, palettes=None):
             unsafe_allow_html=True)
 
 def generate_auto_insights(filtered_df):
+    # Example: most revenue by region
     if filtered_df.empty:
-        return "_No data available for current filters._"
-
-    lines = []
-    # Highest revenue region
-    top_region = filtered_df.groupby('region')['revenue_total'].sum().idxmax()
-    top_region_val = filtered_df.groupby('region')['revenue_total'].sum().max()
-
-    # Segment leader by customer type
-    top_custtype = filtered_df.groupby('customer_type')['revenue_total'].sum().idxmax()
-    top_custtype_val = filtered_df.groupby('customer_type')['revenue_total'].sum().max()
-
-    # Fastest growing market (by region, based on % growth from first to last week)
-    growth = {}
-    for region in filtered_df['region'].unique():
-        region_weeks = filtered_df[filtered_df['region'] == region].sort_values('week')
-        week_sum = region_weeks.groupby('week')['revenue_total'].sum()
-        if len(week_sum) > 1 and week_sum.iloc[0] != 0:
-            pct_growth = (week_sum.iloc[-1] - week_sum.iloc[0]) / week_sum.iloc[0] * 100
-            growth[region] = pct_growth
-    if growth:
-        fastest_growing_region = max(growth, key=growth.get)
-        fastest_growth_value = growth[fastest_growing_region]
+        insight_lines = ["No data available for current filters."]
     else:
-        fastest_growing_region = None
-        fastest_growth_value = 0
+        top_region = (
+            filtered_df.groupby('region')['revenue_total']
+            .sum()
+            .sort_values(ascending=False)
+            .index[0]
+        )
+        top_region_amount = filtered_df.groupby('region')['revenue_total'].sum().max()
 
-    # Best ROAS delivery mode
-    deliv_group = filtered_df.groupby('delivery_mode')['roas'].mean()
-    if not deliv_group.empty:
-        top_roas_mode = deliv_group.idxmax()
-        top_roas_val = deliv_group.max()
-    else:
-        top_roas_mode = top_roas_val = None
+        # Top customer type
+        top_custtype = (
+            filtered_df.groupby('customer_type')['revenue_total']
+            .sum()
+            .sort_values(ascending=False)
+            .index[0]
+        )
+        top_custtype_amt = filtered_df.groupby('customer_type')['revenue_total'].sum().max()
+        
+        # Fastest growing region (by week over week)
+        regions = filtered_df['region'].unique()
+        growth = {}
+        for region in regions:
+            region_df = filtered_df[filtered_df['region'] == region].sort_values('week')
+            week_sum = region_df.groupby('week')['revenue_total'].sum()
+            if len(week_sum) > 1:
+                pct_growth = (week_sum.iloc[-1] - week_sum.iloc[0]) / week_sum.iloc[0] * 100
+                growth[region] = pct_growth
+        fastest_growing_region = max(growth, key=growth.get) if growth else None
+        fastest_growth_value = growth[fastest_growing_region] if growth else 0
 
-    # --- Part 1: Highlights ---
-    lines.append(f"- **Highest Revenue Region:** {top_region} ({top_region_val:,.0f})")
-    lines.append(f"- **Segment Leader:** {top_custtype} customers generated {top_custtype_val:,.0f} in revenue")
-    if fastest_growing_region:
-        lines.append(f"- **Fastest Growing Market:** {fastest_growing_region} ({fastest_growth_value:.1f}% growth)")
-    if top_roas_mode is not None:
-        lines.append(f"- **Best ROAS Delivery Mode:** {top_roas_mode} (Avg ROAS: {top_roas_val:.2f})")
-    else:
-        lines.append("- Best ROAS Delivery Mode: Data not available")
+        # Highest ROAS by delivery mode
+        deliv_group = filtered_df.groupby('delivery_mode')['roas'].mean()
+        if not deliv_group.empty:
+            top_roas_mode = deliv_group.idxmax()
+            top_roas_val = deliv_group.max()
+        else:
+            top_roas_mode = top_roas_val = None
 
-    # --- Part 2: Critical Areas Requiring Attention ---
-    critical_lines = []
-    # Low repeat rate
-    if 'repeat_purchase_flag' in filtered_df.columns:
-        region_repeat = filtered_df.groupby('region')['repeat_purchase_flag'].mean() * 100
-        min_repeat_region = region_repeat.idxmin() if not region_repeat.empty else None
-        min_repeat_value = region_repeat.min() if not region_repeat.empty else None
-        if min_repeat_region and min_repeat_value is not None and min_repeat_value < 40:  # Example threshold
-            critical_lines.append(
-                f"- **Low Repeat Purchase Rate:** {min_repeat_region} region ({min_repeat_value:.1f}%)"
-            )
-    # High churn rate
-    if 'customer_churn_rate' in filtered_df.columns:
-        churn = filtered_df.groupby('region')['customer_churn_rate'].mean() * 100
-        max_churn_region = churn.idxmax() if not churn.empty else None
-        max_churn_value = churn.max() if not churn.empty else None
-        if max_churn_region and max_churn_value is not None and max_churn_value > 25:  # Example threshold
-            critical_lines.append(
-                f"- **High Churn Rate:** {max_churn_region} region ({max_churn_value:.1f}%)"
-            )
-    # Low profit margin
-    if 'profit_margin' in filtered_df.columns:
-        profit_margins = filtered_df.groupby('region')['profit_margin'].mean()
-        low_margin_region = profit_margins.idxmin() if not profit_margins.empty else None
-        low_margin_value = profit_margins.min() if not profit_margins.empty else None
-        if low_margin_region and low_margin_value is not None and low_margin_value < 10:
-            critical_lines.append(
-                f"- **Low Profit Margin:** {low_margin_region} region ({low_margin_value:.1f}%)"
-            )
-    # Add "Critical Areas" headline if any insights found
-    if critical_lines:
-        lines.append("\n**🔴 Critical Areas Needing Attention:**\n" + "\n".join(critical_lines))
+        insight_lines = [
+            f"- **Highest Revenue Region:** {top_region} ({top_region_amount:,.0f})",
+            f"- **Segment Leader:** {top_custtype} customers drove the most revenue ({top_custtype_amt:,.0f})",
+        ]
+        if growth:
+            insight_lines.append(f"- **Fastest Growing Market:** {fastest_growing_region} ({fastest_growth_value:.1f}% growth)")
+        if top_roas_mode is not None:
+            insight_lines.append(f"- **Best ROAS Delivery Mode:** {top_roas_mode} (Avg ROAS: {top_roas_val:.2f})")
+        else:
+            insight_lines.append("- No ROAS data available.")
 
-    return "\n".join(lines)
+    return "\n".join(insight_lines)
 
 def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=None):
     # Prepare CSV for download
@@ -211,7 +186,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- Auto Insights Section (always at top!) ---
+    # --- Auto Insights Section ---
     with st.expander("📌 Auto Insights", expanded=True):
         st.markdown(generate_auto_insights(filtered_df))
 
@@ -219,6 +194,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     show_kpi_cards_with_yoy(filtered_df, palettes)
     st.write("")
 
+    # Revenue Trend by Region (full width)
     st.markdown("**Revenue Trend by Region**")
     rev_trend_region = filtered_df.groupby(['week', 'region'])['revenue_total'].sum().reset_index()
     fig_trend_region = px.line(
@@ -229,6 +205,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     fig_trend_region.update_layout(template="plotly_white")
     st.plotly_chart(fig_trend_region, use_container_width=True)
 
+    # Revenue by Region and Customer Type (pie) side by side
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**Revenue by Region**")
@@ -253,6 +230,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
         fig_custtype_pie.update_traces(textinfo='percent+label')
         st.plotly_chart(fig_custtype_pie, use_container_width=True)
 
+    # Revenue by Delivery Mode and Package Weight Class side by side
     col3, col4 = st.columns(2)
     with col3:
         st.markdown("**Revenue by Delivery Mode**")
@@ -275,6 +253,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
         fig_pkg.update_layout(template="plotly_white")
         st.plotly_chart(fig_pkg, use_container_width=True)
 
+    # Revenue by Service Channel, Account Type, Customer Tier - donuts side by side
     col5, col6, col7 = st.columns(3)
     with col5:
         st.markdown("**Revenue by Service Channel**")
@@ -310,6 +289,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     st.markdown("---")
     st.subheader("Customer Metrics Trends (Weekly)")
 
+    # Weekly Customer Acquisition Cost
     st.markdown("**Weekly Customer Acquisition Cost**")
     cac_trend = filtered_df.groupby('week')['customer_acquisition_cost'].mean().reset_index()
     fig_cac = px.line(
@@ -319,6 +299,7 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     fig_cac.update_layout(template="plotly_white")
     st.plotly_chart(fig_cac, use_container_width=True)
 
+    # Weekly Customer Churn Rate
     st.markdown("**Weekly Customer Churn Rate**")
     churn_trend = filtered_df.groupby('week')['customer_churn_rate'].mean().reset_index()
     fig_churn = px.line(
@@ -327,29 +308,3 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     )
     fig_churn.update_layout(template="plotly_white")
     st.plotly_chart(fig_churn, use_container_width=True)
-
-    # --- One Combined Correlation Matrix Heatmap for Segment Variables ---
-    st.markdown("---")
-    st.markdown("### Correlation Heatmap: Across All Segments")
-    cols = [
-        'region', 'customer_type', 'delivery_mode', 'package_weight_class',
-        'service_channel', 'account_type', 'customer_tier'
-    ]
-    if not filtered_df.empty:
-        encoded = pd.get_dummies(filtered_df[cols], prefix_sep=": ")
-        corr_matrix = encoded.corr()
-        fig_corr = px.imshow(
-            corr_matrix,
-            labels=dict(color="Correlation"),
-            color_continuous_scale="RdBu",
-            zmin=-1, zmax=1,
-            aspect="auto",
-            title="Correlation Heatmap: All Segments"
-        )
-        fig_corr.update_layout(margin=dict(l=40, r=40, t=60, b=40))
-        st.plotly_chart(fig_corr, use_container_width=True)
-    else:
-        st.info("No data available to calculate correlation matrix for this filter selection.")
-
-# Place the provided heatmap image after the correlation section for illustration
-# [image:1]

@@ -46,7 +46,7 @@ def render_filter_summary(date_range, regions, customer_types, delivery_modes, p
         """, unsafe_allow_html=True)
 
 def simple_login():
-    credentials = {"alice": "alice123", "bob": "bob456"}
+    credentials = {"admin": "aliceadmin123", "bob": "bob456"}
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if not st.session_state["authenticated"]:

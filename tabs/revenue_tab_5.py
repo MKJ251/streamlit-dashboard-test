@@ -36,6 +36,7 @@ def show_kpi_cards_with_yoy(filtered_df, palettes=None):
         'repeat_purchase_flag': 'mean',
         'roas': 'mean'
     })
+
     prev_vals = prev_year_df.agg({
         'revenue_total': 'sum',
         'profit': 'sum',
@@ -112,86 +113,77 @@ def show_kpi_cards_with_yoy(filtered_df, palettes=None):
                 <div class='kpi-delta'>{arrow(kpi_yoy['roas'])}</div></div>""",
             unsafe_allow_html=True)
 
-def generate_auto_insights(filtered_df):
-    if filtered_df.empty:
-        return "_No data available for current filters._"
-
+def generate_auto_insights(filtered_df, corr_df_dict):
     lines = []
-    # Highest revenue region
-    top_region = filtered_df.groupby('region')['revenue_total'].sum().idxmax()
-    top_region_val = filtered_df.groupby('region')['revenue_total'].sum().max()
-
-    # Segment leader by customer type
-    top_custtype = filtered_df.groupby('customer_type')['revenue_total'].sum().idxmax()
-    top_custtype_val = filtered_df.groupby('customer_type')['revenue_total'].sum().max()
-
-    # Fastest growing market (by region, based on % growth from first to last week)
-    growth = {}
-    for region in filtered_df['region'].unique():
-        region_weeks = filtered_df[filtered_df['region'] == region].sort_values('week')
-        week_sum = region_weeks.groupby('week')['revenue_total'].sum()
-        if len(week_sum) > 1 and week_sum.iloc[0] != 0:
-            pct_growth = (week_sum.iloc[-1] - week_sum.iloc[0]) / week_sum.iloc[0] * 100
-            growth[region] = pct_growth
-    if growth:
-        fastest_growing_region = max(growth, key=growth.get)
-        fastest_growth_value = growth[fastest_growing_region]
+    if filtered_df.empty:
+        lines = ["No data available for current filters."]
     else:
-        fastest_growing_region = None
-        fastest_growth_value = 0
-
-    # Best ROAS delivery mode
-    deliv_group = filtered_df.groupby('delivery_mode')['roas'].mean()
-    if not deliv_group.empty:
-        top_roas_mode = deliv_group.idxmax()
-        top_roas_val = deliv_group.max()
-    else:
-        top_roas_mode = top_roas_val = None
-
-    # --- Part 1: Highlights ---
-    lines.append(f"- **Highest Revenue Region:** {top_region} ({top_region_val:,.0f})")
-    lines.append(f"- **Segment Leader:** {top_custtype} customers generated {top_custtype_val:,.0f} in revenue")
-    if fastest_growing_region:
-        lines.append(f"- **Fastest Growing Market:** {fastest_growing_region} ({fastest_growth_value:.1f}% growth)")
-    if top_roas_mode is not None:
-        lines.append(f"- **Best ROAS Delivery Mode:** {top_roas_mode} (Avg ROAS: {top_roas_val:.2f})")
-    else:
-        lines.append("- Best ROAS Delivery Mode: Data not available")
-
-    # --- Part 2: Critical Areas Requiring Attention ---
-    critical_lines = []
-    # Low repeat rate
-    if 'repeat_purchase_flag' in filtered_df.columns:
-        region_repeat = filtered_df.groupby('region')['repeat_purchase_flag'].mean() * 100
-        min_repeat_region = region_repeat.idxmin() if not region_repeat.empty else None
-        min_repeat_value = region_repeat.min() if not region_repeat.empty else None
-        if min_repeat_region and min_repeat_value is not None and min_repeat_value < 40:  # Example threshold
-            critical_lines.append(
-                f"- **Low Repeat Purchase Rate:** {min_repeat_region} region ({min_repeat_value:.1f}%)"
-            )
-    # High churn rate
-    if 'customer_churn_rate' in filtered_df.columns:
-        churn = filtered_df.groupby('region')['customer_churn_rate'].mean() * 100
-        max_churn_region = churn.idxmax() if not churn.empty else None
-        max_churn_value = churn.max() if not churn.empty else None
-        if max_churn_region and max_churn_value is not None and max_churn_value > 25:  # Example threshold
-            critical_lines.append(
-                f"- **High Churn Rate:** {max_churn_region} region ({max_churn_value:.1f}%)"
-            )
-    # Low profit margin
-    if 'profit_margin' in filtered_df.columns:
-        profit_margins = filtered_df.groupby('region')['profit_margin'].mean()
-        low_margin_region = profit_margins.idxmin() if not profit_margins.empty else None
-        low_margin_value = profit_margins.min() if not profit_margins.empty else None
-        if low_margin_region and low_margin_value is not None and low_margin_value < 10:
-            critical_lines.append(
-                f"- **Low Profit Margin:** {low_margin_region} region ({low_margin_value:.1f}%)"
-            )
-    # Add "Critical Areas" headline if any insights found
-    if critical_lines:
-        lines.append("\n**🔴 Critical Areas Needing Attention:**\n" + "\n".join(critical_lines))
-
+        # Top region and customer type
+        top_region = (
+            filtered_df.groupby('region')['revenue_total']
+            .sum()
+            .sort_values(ascending=False)
+            .index[0]
+        )
+        top_region_amount = filtered_df.groupby('region')['revenue_total'].sum().max()
+        top_custtype = (
+            filtered_df.groupby('customer_type')['revenue_total']
+            .sum()
+            .sort_values(ascending=False)
+            .index[0]
+        )
+        top_custtype_amt = filtered_df.groupby('customer_type')['revenue_total'].sum().max()
+        lines.append(f"- **Highest Revenue Region:** {top_region} ({top_region_amount:,.0f})")
+        lines.append(f"- **Segment Leader:** {top_custtype} customers drove the most revenue ({top_custtype_amt:,.0f})")
+        # Correlation takeaways:
+        if corr_df_dict:
+            takeaway_lines = []
+            for seg, corr_df in corr_df_dict.items():
+                # highest association (absolute value), but show positive/negative separately
+                max_corr = corr_df.abs().max().max()
+                where = corr_df.abs() == max_corr
+                reg = corr_df.index[where.any(axis=1)][0]
+                seg_val = corr_df.columns[where.loc[where.any(axis=1)].any()]
+                real_corr = corr_df.loc[reg, seg_val]
+                sign = "positive" if real_corr > 0 else "negative"
+                takeaway_lines.append(f"- **Strongest {seg.title()}-Region Association:** {reg} & {seg_val} ({sign} correlation: {real_corr:.2f})")
+            lines.append("**Correlation Insights:**")
+            lines += takeaway_lines
     return "\n".join(lines)
+
+def correlation_heatmap_by_segment(filtered_df, primary="region"):
+    """Returns dict of (segment, corr_df) for each segment, and shows heatmaps."""
+    segments = [
+        ("customer_type", "Customer Type"),
+        ("delivery_mode", "Delivery Mode"),
+        ("package_weight_class", "Package Weight Class"),
+        ("service_channel", "Service Channel"),
+        ("account_type", "Account Type"),
+        ("customer_tier", "Customer Tier"),
+    ]
+    corr_df_dict = {}
+    st.markdown("### Correlation of Revenue Between Region and Key Segments")
+    for seg, seg_label in segments:
+        # Pivot table: rows are regions, columns are segment categories; values are revenue sums over time
+        try:
+            pivot = filtered_df.pivot_table(
+                index=primary, columns=seg, values="revenue_total", aggfunc="sum", fill_value=0
+            )
+            if pivot.shape[1] > 1 and pivot.shape[0] > 1:
+                corr_df = pivot.corr().transpose() if pivot.shape[0] < pivot.shape[1] else pivot.corr()
+                corr_df_dict[seg] = corr_df
+                fig = px.imshow(
+                    corr_df,
+                    text_auto=".2f",
+                    color_continuous_scale="RdBu",
+                    title=f"Correlation Heatmap: Region vs {seg_label}",
+                    aspect="auto"
+                )
+                fig.update_layout(margin=dict(l=40, r=40, t=60, b=40))
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            continue
+    return corr_df_dict
 
 def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=None):
     # Prepare CSV for download
@@ -211,9 +203,10 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- Auto Insights Section (always at top!) ---
-    with st.expander("📌 Auto Insights", expanded=True):
-        st.markdown(generate_auto_insights(filtered_df))
+    # --- Auto Insights Section ---
+    corr_df_dict = {}  # updated below after chart, injected for insights
+    auto_insight_box = st.expander("📌 Auto Insights", expanded=True)
+    # content for auto insights is added after heatmap so we capture correlation insights
 
     st.markdown("### Executive Summary")
     show_kpi_cards_with_yoy(filtered_df, palettes)
@@ -328,28 +321,9 @@ def show_revenue_tab(filtered_df, palettes=None, show_kpi_cards_with_yoy_func=No
     fig_churn.update_layout(template="plotly_white")
     st.plotly_chart(fig_churn, use_container_width=True)
 
-    # --- One Combined Correlation Matrix Heatmap for Segment Variables ---
-    st.markdown("---")
-    st.markdown("### Correlation Heatmap: Across All Segments")
-    cols = [
-        'region', 'customer_type', 'delivery_mode', 'package_weight_class',
-        'service_channel', 'account_type', 'customer_tier'
-    ]
-    if not filtered_df.empty:
-        encoded = pd.get_dummies(filtered_df[cols], prefix_sep=": ")
-        corr_matrix = encoded.corr()
-        fig_corr = px.imshow(
-            corr_matrix,
-            labels=dict(color="Correlation"),
-            color_continuous_scale="RdBu",
-            zmin=-1, zmax=1,
-            aspect="auto",
-            title="Correlation Heatmap: All Segments"
-        )
-        fig_corr.update_layout(margin=dict(l=40, r=40, t=60, b=40))
-        st.plotly_chart(fig_corr, use_container_width=True)
-    else:
-        st.info("No data available to calculate correlation matrix for this filter selection.")
-
-# Place the provided heatmap image after the correlation section for illustration
-# [image:1]
+    # Correlation analysis and charts at the bottom
+    corr_df_dict = correlation_heatmap_by_segment(filtered_df)
+    
+    # Now fill in the Auto Insights expander with final insights, including correlation takeaways
+    with auto_insight_box:
+        st.markdown(generate_auto_insights(filtered_df, corr_df_dict))
